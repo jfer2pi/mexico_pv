@@ -71,7 +71,7 @@ if (length(cne_repo) && is.infinite(cne_repo)) cne_repo <- as.Date(NA)
 
 # Newest month first; stop at the first export that exists
 cne_site <- as.Date(NA); cne_site_url <- NA_character_; cne_tmp <- NA_character_
-cne_errors <- 0L
+cne_errors <- 0L; cne_tried <- character()
 for (k in 0:12) {
   d <- add_months(Sys.Date(), -k)
   if (!is.na(cne_repo) && d < cne_repo) break      # nothing older is of interest
@@ -85,19 +85,26 @@ for (k in 0:12) {
         req_error(is_error = \(r) FALSE) |> req_perform(path = tmp)
       st <- resp_status(resp)
       if (st >= 500) cne_errors <- cne_errors + 1L
-      st == 200 && file.size(tmp) > 10000 &&
-        grepl("permisionario", readLines(tmp, n = 1, warn = FALSE, encoding = "UTF-8"),
-              ignore.case = TRUE)
-    }, error = function(e) { cne_errors <<- cne_errors + 1L; FALSE })
+      sz <- if (file.exists(tmp)) file.size(tmp) else 0
+      head1 <- if (sz > 0) readLines(tmp, n = 1, warn = FALSE, encoding = "UTF-8") else ""
+      cne_tried <- c(cne_tried, sprintf("%s: HTTP %d, %s bytes, %s", tg, st,
+                                        format(sz, big.mark = ","),
+                                        resp_header(resp, "content-type") %||% "no content-type"))
+      st == 200 && sz > 10000 && grepl("permisionario", head1, ignore.case = TRUE)
+    }, error = function(e) {
+      cne_errors <<- cne_errors + 1L
+      cne_tried <<- c(cne_tried, sprintf("%s: %s", tg, conditionMessage(e)))
+      FALSE
+    })
     if (isTRUE(ok)) { cne_site <- d; cne_site_url <- url; cne_tmp <- tmp; break }
   }
   if (!is.na(cne_site)) break
 }
 
-cne_problem <- if (is.na(cne_site) && is.na(cne_repo))
-                 "no CNE export found for the last 12 months and none in the repo" else
-               if (is.na(cne_site) && cne_errors > 0)
-                 "the CNE open-data server returned errors; could not confirm the latest export" else NULL
+message("CNE URLs tried:\n  ", paste(cne_tried, collapse = "\n  "))
+# Not finding even the month already in the repo means the check itself is broken
+cne_problem <- if (is.na(cne_site))
+  sprintf("no CNE export could be downloaded (tried: %s)", paste(cne_tried, collapse = "; ")) else NULL
 cne_new <- !is.na(cne_site) && (is.na(cne_repo) || cne_site > cne_repo)
 cne_file <- NA_character_
 if (cne_new) {
