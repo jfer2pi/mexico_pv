@@ -1,0 +1,17 @@
+# Local cache, rebuilt from the data files on first run
+mx_solar.rds
+
+# R / IDE
+.Rhistory
+.RData
+.Rproj.user/
+.positron/
+rsconnect/
+
+# macOS
+.DS_Store
+
+# Release-check working files (created inside the Actions runner)
+release-check.md
+release-check-title.txt
+state/

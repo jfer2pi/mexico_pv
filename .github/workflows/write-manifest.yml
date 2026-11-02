@@ -1,0 +1,47 @@
+name: Write manifest
+
+# Regenerates manifest.json for Posit Connect Cloud whenever the app or its data
+# files change on main, and commits it back. Commits made with GITHUB_TOKEN do
+# not trigger workflows, so this cannot loop. Can also be run from the Actions tab.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app.R"
+      - "*.xlsx"
+      - "ue_per_gen_hist_*.csv"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: write-manifest
+  cancel-in-progress: true
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Install app packages and rsconnect
+        run: |
+          Rscript -e 'install.packages(c("rsconnect", "shiny", "bslib", "readxl", "dplyr", "tidyr", "leaflet", "plotly", "DT", "htmltools"))'
+
+      - name: Write manifest.json
+        run: |
+          Rscript -e 'files <- c("app.R", list.files(pattern = "(solar.*tracker.*\\.xlsx|ue_per_gen_hist_.*\\.csv)$", ignore.case = TRUE)); print(files); rsconnect::writeManifest(appFiles = files)'
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git diff --cached --quiet && { echo "manifest.json unchanged"; exit 0; }
+          git commit -m "Update manifest.json"
+          git push origin HEAD:${{ github.ref_name }}

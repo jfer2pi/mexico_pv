@@ -1,0 +1,93 @@
+name: Check data releases
+
+# Monthly data check for the Mexico Solar PV Fleet app.
+#  - CNE generation permits: a newer monthly export is downloaded, the manifest
+#    regenerated and both pushed to main (Connect Cloud redeploys).
+#  - GEM solar tracker: a newer release opens an issue asking you to download it
+#    (GEM's download is behind a form).
+# A source that can no longer be read fails the run, which GitHub also emails.
+on:
+  schedule:
+    - cron: "0 7 1 * *"      # 07:00 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  contents: write            # push data updates to main and the state branch
+  issues: write              # open the notification issue
+
+concurrency:
+  group: check-data-releases
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # State lives on its own branch so routine runs never redeploy main
+      - name: Load state branch
+        run: |
+          if git fetch origin release-check-state:release-check-state 2>/dev/null; then
+            git worktree add state release-check-state
+          else
+            git worktree add --orphan -b release-check-state state
+          fi
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Install R packages
+        run: Rscript -e 'install.packages(c("httr2", "jsonlite"))'
+
+      - name: Check GEM and CNE
+        id: check
+        env:
+          STATE_FILE: state/data-state.json
+        run: Rscript scripts/check_releases.R
+
+      # Only when a new CNE export was downloaded
+      - name: Regenerate manifest
+        if: always() && steps.check.outputs.cne_updated == 'true'
+        run: |
+          Rscript -e 'install.packages(c("rsconnect", "shiny", "bslib", "readxl", "dplyr", "tidyr", "leaflet", "plotly", "DT", "htmltools"))'
+          Rscript -e 'files <- c("app.R", list.files(pattern = "(solar.*tracker.*\\.xlsx|ue_per_gen_hist_.*\\.csv)$", ignore.case = TRUE)); rsconnect::writeManifest(appFiles = files)'
+
+      - name: Push data update to main
+        if: always() && steps.check.outputs.cne_updated == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add -A -- 'ue_per_gen_hist_*.csv' manifest.json
+          git commit -m "Update CNE generation permits export ($(ls ue_per_gen_hist_*.csv | head -n1))"
+          git push origin HEAD:${{ github.event.repository.default_branch }}
+
+      - name: Open issue
+        if: always() && steps.check.outputs.notify == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="$(head -n1 release-check-title.txt)"
+          open=$(gh issue list --state open --label data-release --json title \
+                   --jq "[.[] | select(.title == \"$title\")] | length" 2>/dev/null || echo 0)
+          if [ "$open" = "0" ]; then
+            gh label create data-release --color 5E6AD2 \
+              --description "New source data for the dashboard" --force
+            gh issue create --title "$title" --body-file release-check.md --label data-release
+          else
+            echo "An open issue already exists: $title"
+          fi
+
+      # Runs every month, which also keeps the schedule from being disabled
+      # after 60 days without repository activity
+      - name: Save state
+        if: always()
+        working-directory: state
+        run: |
+          [ -f data-state.json ] || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add data-state.json
+          git commit -m "Release check $(date -u +%F)" || exit 0
+          git push origin release-check-state
