@@ -40,12 +40,13 @@ Capacities above 1,500 are treated as kW, which a few rows evidently are.
 `.github/workflows/check-data-releases.yml` runs `scripts/check_releases.R` on the 1st of
 every month (or on demand from the Actions tab):
 
-- **CNE permits, fully automatic.** The export is published at
+- **CNE permits, reminder.** The export is published at
   `https://repodatos.atdt.gob.mx/api_update/cne/electricidad/ue_per_gen_hist_<mes><yy>.csv`
-  (e.g. `ago26`). The check tries the last 12 months, and when a newer export than the
-  one in the repo exists it downloads it, removes the old one, regenerates
-  `manifest.json` and pushes to `main`. Connect Cloud redeploys and the app re-matches
-  permits on the next load.
+  (e.g. `ago26`), but that server refuses GitHub's runners (HTTP 403). The check still
+  tries each month and, if a download ever gets through, updates the export and pushes it.
+  Otherwise, once the export in the repo is more than 3 months old, it opens an issue
+  listing the newer export URLs: open them in a browser, save the newest that downloads
+  next to `app.R` under its original name, delete the old one and push.
 - **GEM tracker, notify only.** GEM's download sits behind a form (the file comes from a
   signed link that expires in 10 minutes), so the check compares the newest release month
   on GEM's pages with the `Global-Solar-Power-Tracker-<Month>-<Year>.xlsx` in the repo and

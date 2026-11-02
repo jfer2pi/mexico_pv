@@ -7,6 +7,9 @@
 #    Tries the last 12 months, newest first. When one is newer than the export
 #    in the repo, downloads it to the repo root and removes the older export.
 #    The workflow then regenerates manifest.json and pushes to main.
+#    In practice the server refuses GitHub's runners (HTTP 403), so this mostly
+#    falls back to a reminder: once the repo export is over 3 months old, an
+#    issue lists the newer export URLs to download by hand.
 #  - GEM Global Solar Power Tracker: the download is behind a form, so this only
 #    detects a release newer than the Global-Solar-Power-Tracker-<Month>-<Year>.xlsx
 #    in the repo and asks you to download it. Keeps asking until you do.
@@ -102,9 +105,24 @@ for (k in 0:12) {
 }
 
 message("CNE URLs tried:\n  ", paste(cne_tried, collapse = "\n  "))
-# Not finding even the month already in the repo means the check itself is broken
-cne_problem <- if (is.na(cne_site))
-  sprintf("no CNE export could be downloaded (tried: %s)", paste(cne_tried, collapse = "; ")) else NULL
+# The CNE open-data server answers 403 to GitHub's runners (it blocks data-centre
+# addresses), so a failed download is expected and not an error. Instead, once
+# the export in the repo is more than CNE_STALE_MONTHS old, remind to check by
+# hand with direct links to the newer exports.
+CNE_STALE_MONTHS <- 3
+cne_blocked <- is.na(cne_site) && length(cne_tried) &&
+  all(grepl("HTTP 403", cne_tried[grepl("HTTP", cne_tried)]))
+cne_problem <- if (is.na(cne_site) && is.na(cne_repo))
+  "no CNE export in the repo and none could be downloaded" else NULL
+cne_stale <- is.na(cne_site) && !is.na(cne_repo) &&
+  cne_repo < add_months(Sys.Date(), -CNE_STALE_MONTHS)
+cne_check_urls <- character()
+if (cne_stale) {
+  k <- 1
+  while ((d <- add_months(cne_repo, k)) <= first_of_month(Sys.Date())) {
+    cne_check_urls <- c(cne_check_urls, sprintf(CNE_URL, cne_tag(d))); k <- k + 1
+  }
+}
 cne_new <- !is.na(cne_site) && (is.na(cne_repo) || cne_site > cne_repo)
 cne_file <- NA_character_
 if (cne_new) {
@@ -159,8 +177,13 @@ lines <- unlist(c(
   "### CNE generation permits",
   sprintf("- Was in repo: **%s**%s", fmt_month(cne_repo),
           if (length(repo_cne)) sprintf(" (`%s`)", paste(repo_cne, collapse = "`, `")) else ""),
-  sprintf("- Latest on the CNE open-data server: **%s**", fmt_month(cne_site)),
+  if (!is.na(cne_site)) sprintf("- Latest on the CNE open-data server: **%s**", fmt_month(cne_site))
+  else if (cne_blocked) "- The CNE open-data server refused the download from GitHub (HTTP 403), as usual; checking by hand instead."
+  else sprintf("- Could not download from the CNE open-data server (%s).", paste(cne_tried, collapse = "; ")),
   if (!is.null(cne_problem)) sprintf("- Problem: %s.", cne_problem),
+  if (cne_stale) c("", sprintf("**The export in the repo is over %d months old.** Open these in your browser, newest last, and use the newest that downloads:", CNE_STALE_MONTHS),
+                   sprintf("  - %s", cne_check_urls),
+                   "", "Save it next to `app.R` under its original name, delete the old `ue_per_gen_hist_*.csv` and push. The manifest regenerates on push."),
   if (cne_new) c("", sprintf("**Downloaded `%s` and pushed it to `main`** with a regenerated manifest. Connect Cloud redeploys and the app rebuilds its cache and permit matches on the next load.", cne_file)),
   "", "### GEM Global Solar Power Tracker",
   sprintf("- In repo: **%s**%s", fmt_month(gem_repo),
@@ -171,7 +194,8 @@ lines <- unlist(c(
 ))
 
 parts <- c(if (gem_new) sprintf("GEM solar tracker %s (download needed)", fmt_month(gem_site)),
-           if (cne_new) sprintf("CNE permits %s (updated automatically)", fmt_month(cne_site)))
+           if (cne_new) sprintf("CNE permits %s (updated automatically)", fmt_month(cne_site)),
+           if (cne_stale) sprintf("check for a CNE permits export newer than %s", fmt_month(cne_repo)))
 notify <- length(parts) > 0
 title  <- if (notify) paste("New data:", paste(parts, collapse = " + ")) else "No new data"
 
