@@ -1,5 +1,7 @@
 # Mexico Solar PV Fleet
 
+**[Open the live app](https://jfer2pi-pv-mexico.share.connect.posit.cloud/)** · Part of [Fernando Rodríguez Alvarado's portfolio](https://jfer2pi.github.io)
+
 Shiny dashboard of utility-scale solar PV in Mexico, the sibling of the US Solar PV Fleet app.
 One self-contained `app.R`, no API keys.
 
